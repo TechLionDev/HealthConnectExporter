@@ -14,7 +14,7 @@ else
 fi
 
 # Fix JAVA_HOME for CachyOS (Arch)
-export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
 export PATH="$JAVA_HOME/bin:$PATH"
 echo "[1/5] JAVA_HOME=$JAVA_HOME"
 java -version 2>&1 | head -1
