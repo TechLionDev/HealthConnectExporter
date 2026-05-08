@@ -1,165 +1,285 @@
 package com.techlion.healthconnectexporter
 
 import android.content.Context
+import android.os.Environment
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.*
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.BasalBodyTemperatureRecord
+import androidx.health.connect.client.records.BloodGlucoseRecord
+import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.BodyFatRecord
+import androidx.health.connect.client.records.BodyTemperatureRecord
+import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.HydrationRecord
+import androidx.health.connect.client.records.NutritionRecord
+import androidx.health.connect.client.records.OxygenSaturationRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.SpeedRecord
+import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.Vo2MaxRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
-import androidx.health.connect.client.time.TimeRangeFilter
-import androidx.work.CoroutineWorker
-import androidx.work.WorkerParameters
-import androidx.work.workDataOf
-import com.google.gson.GsonBuilder
+import androidx.health.connect.client.filter.TimeRangeFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
-class ExportWorker(
-    context: Context,
-    params: WorkerParameters
-) : CoroutineWorker(context, params) {
+class ExportWorker(private val context: Context) {
 
-    companion object {
-        const val KEY_START_TIME = "start_time"
-        const val KEY_END_TIME = "end_time"
-        const val KEY_PROGRESS = "progress"
-        const val KEY_OUTPUT_FILE = "output_file"
-        const val KEY_ERROR = "error"
+    private val healthConnectClient = HealthConnectClient.Builder(context).build()
+
+    private val permissions = setOf(
+        HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(HeartRateRecord::class),
+        HealthPermission.getReadPermission(RestingHeartRateRecord::class),
+        HealthPermission.getReadPermission(SleepSessionRecord::class),
+        HealthPermission.getReadPermission(HydrationRecord::class),
+        HealthPermission.getReadPermission(NutritionRecord::class),
+        HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.getReadPermission(HeightRecord::class),
+        HealthPermission.getReadPermission(BloodGlucoseRecord::class),
+        HealthPermission.getReadPermission(BloodPressureRecord::class),
+        HealthPermission.getReadPermission(BasalBodyTemperatureRecord::class),
+        HealthPermission.getReadPermission(BodyTemperatureRecord::class),
+        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
+        HealthPermission.getReadPermission(Vo2MaxRecord::class),
+        HealthPermission.getReadPermission(SpeedRecord::class),
+        HealthPermission.getReadPermission(RespiratoryRateRecord::class),
+        HealthPermission.getReadPermission(BodyFatRecord::class)
+    )
+
+    suspend fun hasAllPermissions(): Boolean {
+        return healthConnectClient.permissionController.getGrantedPermissions()
+            .containsAll(permissions)
     }
 
-    private val gson = GsonBuilder().setPrettyPrinting().create()
-
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    suspend fun exportAll(callback: (String, Int, Int) -> Unit): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val client = HealthConnectClient.getOrCreate(applicationContext)
-
-            val startTime = inputData.getString(KEY_START_TIME)?.let { Instant.parse(it) }
-                ?: Instant.ofEpochSecond(0)
-            val endTime = inputData.getString(KEY_END_TIME)?.let { Instant.parse(it) }
-                ?: Instant.now()
-
-            val timeRange = TimeRangeFilter.between(startTime, endTime)
-            val allData = mutableMapOf<String, Any>()
-
+            var totalRecords = 0
+            @Suppress("UNCHECKED_CAST")
             val recordTypes = listOf(
-                "steps" to StepsRecord::class,
-                "heart_rate" to HeartRateRecord::class,
-                "resting_heart_rate" to RestingHeartRateRecord::class,
-                "heart_rate_variability" to HeartRateVariabilityRmssdRecord::class,
-                "blood_pressure" to BloodPressureRecord::class,
-                "blood_glucose" to BloodGlucoseRecord::class,
-                "body_temperature" to BodyTemperatureRecord::class,
-                "oxygen_saturation" to OxygenSaturationRecord::class,
-                "body_fat" to BodyFatRecord::class,
-                "weight" to WeightRecord::class,
-                "height" to HeightRecord::class,
-                "lean_body_mass" to LeanBodyMassRecord::class,
-                "basal_metabolic_rate" to BasalMetabolicRateRecord::class,
-                "active_calories" to ActiveCaloriesBurnedRecord::class,
-                "total_calories" to TotalCaloriesBurnedRecord::class,
-                "exercise_sessions" to ExerciseSessionRecord::class,
-                "total_steps" to TotalStepsRecord::class,
-                "distance" to DistanceRecord::class,
-                "floors_climbed" to FloorsClimbedRecord::class,
-                "nutrition" to NutritionRecord::class,
-                "hydration" to HydrationRecord::class,
-                "sleep_sessions" to SleepSessionRecord::class,
-                "sleep_stages" to SleepStageRecord::class,
-                "vo2_max" to Vo2MaxRecord::class,
-                "power" to PowerRecord::class,
-                "speed" to SpeedRecord::class,
-                "cycling_revolutions" to CyclingWheelRevolutionRecord::class,
-                "cycling_rpm" to CyclingWheelRpmRecord::class,
-                "respiratory_rate" to RespiratoryRateRecord::class
+                StepsRecord::class as KClass<out androidx.health.connect.client.records.Record> to "steps" to "count",
+                ActiveCaloriesBurnedRecord::class to "activeCaloriesBurned" to "energy_kcal",
+                HeartRateRecord::class to "heartRate" to "samples",
+                RestingHeartRateRecord::class to "restingHeartRate" to "value",
+                SleepSessionRecord::class to "sleepSession" to "stages",
+                HydrationRecord::class to "hydration" to "volume_ml",
+                NutritionRecord::class to "nutrition" to "calories",
+                WeightRecord::class to "weight" to "kg",
+                HeightRecord::class to "height" to "m",
+                BloodGlucoseRecord::class to "bloodGlucose" to "level",
+                BloodPressureRecord::class to "bloodPressure" to "bp",
+                BasalBodyTemperatureRecord::class to "basalBodyTemperature" to "celsius",
+                BodyTemperatureRecord::class to "bodyTemperature" to "celsius",
+                OxygenSaturationRecord::class to "oxygenSaturation" to "percent",
+                Vo2MaxRecord::class to "vo2Max" to "vo2max",
+                SpeedRecord::class to "speed" to "mps",
+                RespiratoryRateRecord::class to "respiratoryRate" to "rate",
+                BodyFatRecord::class to "bodyFat" to "percent"
             )
 
-            val total = recordTypes.size
-            recordTypes.forEachIndexed { index, (name, recordClass) ->
-                val progress = ((index + 1) * 100) / total
-                setProgress(workDataOf(KEY_PROGRESS to progress))
+            val epochStart = Instant.EPOCH
 
-                try {
-                    val result = readAllPages(client, recordClass, timeRange)
-                    allData[name] = result
-                } catch (e: Exception) {
-                    allData[name] = mapOf("error" to (e.message ?: "unknown"))
+            for (entry in recordTypes.withIndex()) {
+                val recordType = entry.value.first
+                val fileName = entry.value.second
+                var pageToken: String? = null
+                var recordCount = 0
+                val file = getExportFile(fileName)
+
+                do {
+                    val request = ReadRecordsRequest(
+                        recordType = recordType,
+                        timeRangeFilter = TimeRangeFilter.after(epochStart),
+                        pageSize = 10000,
+                        pageToken = pageToken
+                    )
+
+                    val response = healthConnectClient.readRecords(request)
+                    val records = response.records
+
+                    for (record in records) {
+                        file.appendText(recordToCsvLine(record as androidx.health.connect.client.records.Record))
+                        recordCount++
+                    }
+
+                    pageToken = response.pageToken
+                } while (pageToken != null)
+
+                if (recordCount > 0) {
+                    callback(fileName, recordCount, entry.index + 1)
+                    totalRecords += recordCount
                 }
             }
 
-            // Write to file
-            val json = gson.toJson(allData)
-            val exportDir = File(applicationContext.filesDir, "exports")
-            exportDir.mkdirs()
-            val timestamp = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
-            val file = File(exportDir, "health_export_$timestamp.json")
-            file.writeText(json)
-
-            setProgress(workDataOf(KEY_PROGRESS to 100))
-            Result.success(workDataOf(KEY_OUTPUT_FILE to file.absolutePath))
-
+            Result.success(totalRecords)
         } catch (e: Exception) {
-            Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Export failed")))
+            Result.failure(e)
         }
     }
 
-    private suspend inline fun <reified T : androidx.health.connect.client.records.Record> readAllPages(
-        client: HealthConnectClient,
-        recordClass: Class<T>,
-        timeRange: TimeRangeFilter
-    ): List<Map<String, Any?>> {
-        val results = mutableListOf<Map<String, Any?>>()
-        var lastRecordTime: Instant? = null
+    private fun getExportFile(name: String): File {
+        val exportDir = File(
+            context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+            "HealthConnectExport"
+        )
+        exportDir.mkdirs()
+        return File(exportDir, "${name}.csv").also { if (it.exists()) it.delete() }
+    }
 
-        while (true) {
-            val request = ReadRecordsRequest(
-                recordType = recordClass,
-                timeRangeFilter = if (lastRecordTime != null) {
-                    TimeRangeFilter.between(lastRecordTime, Instant.parse(inputData.getString(KEY_END_TIME) ?: Instant.now().toString()))
-                } else {
-                    timeRange
-                },
-                pageSize = 1000
-            )
+    private fun formatTime(time: Instant): String {
+        return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneOffset.UTC)
+            .format(time)
+    }
 
-            val response = try {
-                client.readRecords(request)
-            } catch (e: Exception) {
-                // If this record type isn't available, skip it
-                return results
-            }
+    @Suppress("UNCHECKED_CAST")
+    private fun recordToCsvLine(record: androidx.health.connect.client.records.Record): String {
+        return try {
+            when (record) {
+                is StepsRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.count.toString(),
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
 
-            if (response.records.isEmpty()) break
+                is ActiveCaloriesBurnedRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.energy?.inKilocalories?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
 
-            for (record in response.records) {
-                val map = mutableMapOf<String, Any?>()
-                // Use reflection to extract common fields
-                record::class.java.declaredFields.forEach { field ->
-                    field.isAccessible = true
-                    val value = field.get(record)
-                    if (value != null && !field.name.contains("$")) {
-                        map[field.name] = value.toString()
-                    }
-                }
-                // Also extract via toMap if available
-                try {
-                    val method = record::class.java.getMethod("toMap")
-                    @Suppress("UNCHECKED_CAST")
-                    val toMapResult = method.invoke(record) as? Map<String, Any?>
-                    toMapResult?.let { map.putAll(it) }
-                } catch (_: Exception) {}
+                is HeartRateRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.samples.joinToString(";") { "${it.time}:${it.beatsPerMinute}" },
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
 
-                results.add(map)
-                try {
-                    val timeField = record::class.java.getMethod("getEndTime")
-                    lastRecordTime = timeField.invoke(record) as? Instant
-                } catch (_: Exception) {}
-            }
+                is RestingHeartRateRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.measuredValue.toString(),
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
 
-            if (!response.hasNextPage) break
+                is SleepSessionRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.title ?: "Sleep",
+                    record.stages.joinToString(";") { "${it.stage.name}=${it.startTime}" },
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is HydrationRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.volume?.inMilliliters?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is NutritionRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.energy?.inKilocalories?.toString() ?: "0",
+                    record.protein?.inGrams?.toString() ?: "0",
+                    record.carbohydrates?.inGrams?.toString() ?: "0",
+                    record.fat?.inGrams?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is WeightRecord -> listOf(
+                    formatTime(record.time),
+                    record.weight?.inKilograms?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is HeightRecord -> listOf(
+                    formatTime(record.time),
+                    record.height?.inMeters?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is BloodGlucoseRecord -> listOf(
+                    formatTime(record.time),
+                    record.level?.inMillimolesPerLiter?.toString() ?: "0",
+                    record.specimenSource?.name ?: "",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is BloodPressureRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.diastolic?.inMillimetersOfMercury?.toString() ?: "0",
+                    record.systolic?.inMillimetersOfMercury?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is BasalBodyTemperatureRecord -> listOf(
+                    formatTime(record.time),
+                    record.measurement?.inCelsius?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is BodyTemperatureRecord -> listOf(
+                    formatTime(record.time),
+                    record.measurement?.inCelsius?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is OxygenSaturationRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.percentage?.value?.times(100)?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is Vo2MaxRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.rating?.name ?: "",
+                    record.measurement?.inMillilitersPerKilogramPerMinute?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is SpeedRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.samples.joinToString(";") { "${it.time}:${it.metersPerSecond}" },
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is RespiratoryRateRecord -> listOf(
+                    formatTime(record.startTime),
+                    formatTime(record.endTime),
+                    record.measurement?.rate?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                is BodyFatRecord -> listOf(
+                    formatTime(record.time),
+                    record.percentage?.value?.times(100)?.toString() ?: "0",
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+
+                else -> listOf(
+                    formatTime(record.startTime),
+                    record.javaClass.simpleName,
+                    record.metadata.dataOrigin.packageName
+                ).joinToString(",")
+            } + "\n"
+        } catch (e: Exception) {
+            "${formatTime(record.startTime)},ERROR:${e.message}\n"
         }
-
-        return results
     }
 }

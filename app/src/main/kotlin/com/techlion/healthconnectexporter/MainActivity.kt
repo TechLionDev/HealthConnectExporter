@@ -1,80 +1,34 @@
 package com.techlion.healthconnectexporter
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.*
-import androidx.health.connect.client.request.ReadRecordsRequest
-import androidx.health.connect.client.time.TimeRangeFilter
-import androidx.work.*
-import kotlinx.coroutines.*
-import java.time.Instant
-import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
-import java.util.concurrent.TimeUnit
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var healthConnectClient: HealthConnectClient
-    private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
+    private lateinit var progressBar: ProgressBar
     private lateinit var exportButton: Button
 
-    private val requiredPermissions = setOf(
-        HealthPermission.getReadPermission(StepsRecord::class),
-        HealthPermission.getReadPermission(HeartRateRecord::class),
-        HealthPermission.getReadPermission(RestingHeartRateRecord::class),
-        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
-        HealthPermission.getReadPermission(BloodPressureRecord::class),
-        HealthPermission.getReadPermission(BloodGlucoseRecord::class),
-        HealthPermission.getReadPermission(BodyTemperatureRecord::class),
-        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
-        HealthPermission.getReadPermission(BodyFatRecord::class),
-        HealthPermission.getReadPermission(WeightRecord::class),
-        HealthPermission.getReadPermission(HeightRecord::class),
-        HealthPermission.getReadPermission(LeanBodyMassRecord::class),
-        HealthPermission.getReadPermission(BasalMetabolicRateRecord::class),
-        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
-        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
-        HealthPermission.getReadPermission(ExerciseSessionRecord::class),
-        HealthPermission.getReadPermission(TotalStepsRecord::class),
-        HealthPermission.getReadPermission(DistanceRecord::class),
-        HealthPermission.getReadPermission(FloorsClimbedRecord::class),
-        HealthPermission.getReadPermission(NutritionRecord::class),
-        HealthPermission.getReadPermission(HydrationRecord::class),
-        HealthPermission.getReadPermission(SleepSessionRecord::class),
-        HealthPermission.getReadPermission(SleepStageRecord::class),
-        HealthPermission.getReadPermission(Vo2MaxRecord::class),
-        HealthPermission.getReadPermission(PowerRecord::class),
-        HealthPermission.getReadPermission(SpeedRecord::class),
-        HealthPermission.getReadPermission(CyclingWheelRevolutionRecord::class),
-        HealthPermission.getReadPermission(CyclingWheelRpmRecord::class),
-        HealthPermission.getReadPermission(MenstruationFlowRecord::class),
-        HealthPermission.getReadPermission(OvulationTestRecord::class),
-        HealthPermission.getReadPermission(CervicalMucusRecord::class),
-        HealthPermission.getReadPermission(BasalBodyTemperatureRecord::class),
-        HealthPermission.getReadPermission(RespiratoryRateRecord::class)
-    )
+    private val exportWorker = ExportWorker(this)
 
     private val permissionLauncher = registerForActivityResult(
-        PermissionController.createRequestPermissionResultContract()
+        ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        if (granted.containsAll(requiredPermissions)) {
-            runExport()
+        if (granted.values.all { it }) {
+            export()
         } else {
-            statusText.text = "Permissions denied. Cannot export."
+            statusText.text = "Permissions required to export data."
             exportButton.isEnabled = true
         }
     }
@@ -83,88 +37,91 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        healthConnectClient = HealthConnectClient.getOrCreate(this)
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
-        progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
+        progressBar = findViewById(R.id.progressBar)
         exportButton = findViewById(R.id.exportButton)
 
-        checkAvailability()
+        exportButton.setOnClickListener { checkAndRequestPermissions() }
+        findViewById<Button>(R.id.shareButton).setOnClickListener { shareExportedFiles() }
+        findViewById<Button>(R.id.clearButton).setOnClickListener { clearExports() }
+
+        updateStatus()
     }
 
-    private fun checkAvailability() {
-        val availability = HealthConnectClient.getSdkStatus(this)
-        when (availability) {
-            HealthConnectClient.SDK_AVAILABLE -> {
-                statusText.text = "Health Connect ready. Tap Export to pull all data."
-                exportButton.isEnabled = true
-                exportButton.setOnClickListener { requestPermissions() }
-            }
-            HealthConnectClient.SDK_UNAVAILABLE -> {
-                statusText.text = "Health Connect is not installed. Please install it from the Play Store."
-                exportButton.isEnabled = false
-            }
-            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
-                statusText.text = "Health Connect needs an update. Please update it from the Play Store."
-                exportButton.isEnabled = false
+    private fun checkAndRequestPermissions() {
+        lifecycleScope.launch {
+            if (exportWorker.hasAllPermissions()) {
+                export()
+            } else {
+                val perms = exportWorker.permissions.toList()
+                permissionLauncher.launch(perms.map { it.javaClass.name }.toTypedArray())
             }
         }
     }
 
-    private fun requestPermissions() {
-        val granted = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }.toSet()
-
-        if (granted.containsAll(requiredPermissions)) {
-            runExport()
-        } else {
-            permissionLauncher.launch(requiredPermissions)
-        }
-    }
-
-    private fun runExport() {
+    private fun export() {
+        statusText.text = "Exporting..."
+        progressBar.visibility = android.view.View.VISIBLE
         exportButton.isEnabled = false
-        statusText.text = "Starting export..."
 
-        val workRequest = OneTimeWorkRequestBuilder<ExportWorker>()
-            .setInputData(workDataOf(
-                ExportWorker.KEY_START_TIME to "2000-01-01T00:00:00Z",
-                ExportWorker.KEY_END_TIME to Instant.now().toString()
-            ))
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
-
-        WorkManager.getInstance(this)
-            .enqueueUniqueWork(
-                "health_export",
-                ExistingWorkPolicy.REPLACE,
-                workRequest
-            )
-
-        WorkManager.getInstance(this)
-            .getWorkInfoByIdLiveData(workRequest.id)
-            .observe(this) { workInfo ->
-                when (workInfo?.state) {
-                    WorkInfo.State.RUNNING -> {
-                        val progress = workInfo.progress.getInt(ExportWorker.KEY_PROGRESS, 0)
-                        progressBar.progress = progress
-                        statusText.text = "Exporting... $progress%"
-                    }
-                    WorkInfo.State.SUCCEEDED -> {
-                        progressBar.progress = 100
-                        val output = workInfo.outputData.getString(ExportWorker.KEY_OUTPUT_FILE)
-                        statusText.text = "Done! Saved to: $output"
-                        exportButton.isEnabled = true
-                        Toast.makeText(this, "Export complete!", Toast.LENGTH_LONG).show()
-                    }
-                    WorkInfo.State.FAILED -> {
-                        val error = workInfo.outputData.getString(ExportWorker.KEY_ERROR)
-                        statusText.text = "Failed: $error"
-                        exportButton.isEnabled = true
-                    }
-                    else -> {}
+        lifecycleScope.launch {
+            val result = exportWorker.exportAll { name, count, _ ->
+                runOnUiThread {
+                    statusText.text = "Exporting $name: $count records..."
                 }
             }
+
+            progressBar.visibility = android.view.View.GONE
+            exportButton.isEnabled = true
+
+            result.onSuccess { total ->
+                statusText.text = "Exported $total records total.\nTap Share to send the files."
+                Snackbar.make(findViewById(R.id.main), "Export complete!", Snackbar.LENGTH_LONG).show()
+            }.onFailure { error ->
+                statusText.text = "Export failed: ${error.message}"
+                Snackbar.make(findViewById(R.id.main), "Error: ${error.message}", Snackbar.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun shareExportedFiles() {
+        val exportDir = File(getExternalFilesDir(null), "HealthConnectExport")
+        if (!exportDir.exists() || exportDir.listFiles()?.isEmpty() != false) {
+            Snackbar.make(findViewById(R.id.main), "No exports found", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        val files = exportDir.listFiles() ?: return
+        val uris = files.map { androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", it) }
+
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "text/csv"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share Health Connect Export"))
+    }
+
+    private fun clearExports() {
+        val exportDir = File(getExternalFilesDir(null), "HealthConnectExport")
+        exportDir.listFiles()?.forEach { it.delete() }
+        updateStatus()
+        Snackbar.make(findViewById(R.id.main), "Exports cleared", Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun updateStatus() {
+        val exportDir = File(getExternalFilesDir(null), "HealthConnectExport")
+        val files = exportDir.listFiles()
+        statusText.text = if (files.isNullOrEmpty()) {
+            "No exports yet.\nGrant permissions and tap Export."
+        } else {
+            "${files.size} export files ready:\n${files.joinToString("\n") { it.name }}"
+        }
     }
 }
