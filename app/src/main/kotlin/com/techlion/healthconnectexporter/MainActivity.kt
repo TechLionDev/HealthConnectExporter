@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
                 export()
             } else {
                 val perms = exportWorker.permissions.toList()
-                permissionLauncher.launch(perms.map { it.javaClass.name }.toTypedArray())
+                permissionLauncher.launch(perms.toTypedArray())
             }
         }
     }
