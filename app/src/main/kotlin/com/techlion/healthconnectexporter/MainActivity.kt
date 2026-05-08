@@ -2,6 +2,7 @@ package com.techlion.healthconnectexporter
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Environment
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
@@ -14,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.health.connect.client.HealthConnectClient
 
 class MainActivity : AppCompatActivity() {
 
@@ -89,7 +91,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareExports() {
-        val exportDir = File(getExternalFilesDir(null), "HealthConnectExport")
+        val exportDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "HealthConnectExport")
         val files = exportDir.listFiles() ?: return
         if (files.isEmpty()) {
             Snackbar.make(findViewById<View>(android.R.id.content), "No exports found", Snackbar.LENGTH_SHORT).show()
@@ -107,7 +109,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStatus() {
-        val exportDir = File(getExternalFilesDir(null), "HealthConnectExport")
+        val exportDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "HealthConnectExport")
         val files = exportDir.listFiles()
         statusText.text = if (files.isNullOrEmpty()) {
             "Grant permissions and tap Export."
