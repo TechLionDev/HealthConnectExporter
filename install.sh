@@ -30,12 +30,13 @@ echo "[2/5] SDK: $SDK_DIR exists"
 # Install build tools and platform via SDK manager
 export ANDROID_HOME="$SDK_DIR"
 export ANDROID_SDK_ROOT="$SDK_DIR"
+SDK_MANAGER="/opt/android-sdk/tools/bin/sdkmanager"
 
 if [ ! -d "$SDK_DIR/platforms/android-34" ]; then
     echo "[3/5] Installing Android SDK platforms..."
-    yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --install \
+    yes | "$SDK_MANAGER" --install \
         "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || \
-    yes | "$SDK_DIR/tools/bin/sdkmanager" --install \
+    yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --install \
         "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || true
 fi
 echo "[3/5] Platforms ready"
