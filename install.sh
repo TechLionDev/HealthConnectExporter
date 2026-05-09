@@ -35,7 +35,7 @@ export PATH="$SDK_DIR/cmdline-tools/latest/bin:$SDK_DIR/platform-tools:$PATH"
 # Accept licenses and install required SDK components
 echo "[3/5] Accepting licenses and installing SDK 35..."
 yes | sdkmanager --licenses > /dev/null 2>&1 || true
-sdkmanager --install "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1
+sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1
 
 # Download Gradle 8.5 if wrapper missing
 WRAPPER_JAR="$HOME/HealthConnectExporter/gradle/wrapper/gradle-wrapper.jar"
