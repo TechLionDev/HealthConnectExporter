@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.techlion.healthconnectexporter"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.techlion.healthconnectexporter"
         minSdk = 28
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -42,7 +42,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.8.2")
 
     // Health Connect
-    implementation("androidx.health.connect:connect-client:1.0.0-alpha04")
+    implementation("androidx.health.connect:connect-client:1.1.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
