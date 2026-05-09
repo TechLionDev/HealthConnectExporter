@@ -33,23 +33,23 @@ export ANDROID_SDK_ROOT="$SDK_DIR"
 export PATH="$SDK_DIR/cmdline-tools/latest/bin:$SDK_DIR/platform-tools:$PATH"
 
 # Accept licenses and install required SDK components
-echo "[3/5] Accepting licenses and installing SDK 35..."
+echo "[3/5] Accepting licenses and installing SDK 36..."
 yes | sdkmanager --licenses > /dev/null 2>&1 || true
 sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1
 
-# Download Gradle 8.5 if wrapper missing
+# Download Gradle 8.11.1 wrapper JAR if missing
 WRAPPER_JAR="$HOME/HealthConnectExporter/gradle/wrapper/gradle-wrapper.jar"
 if [ ! -f "$WRAPPER_JAR" ]; then
-    echo "[4/5] Downloading Gradle wrapper..."
+    echo "[4/5] Downloading Gradle 8.11.1 wrapper..."
     mkdir -p "$HOME/HealthConnectExporter/gradle/wrapper"
-    curl -fsSL "https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar" -o "$WRAPPER_JAR"
+    curl -fsSL "https://github.com/gradle/gradle/raw/v8.11.1/gradle/wrapper/gradle-wrapper.jar" -o "$WRAPPER_JAR"
 fi
 
-# Update gradle wrapper properties
+# Update gradle wrapper properties to 8.11.1
 cat > "$HOME/HealthConnectExporter/gradle/wrapper/gradle-wrapper.properties" << 'GRADLEPROPS'
 distributionBase=GRADLE_USER_HOME
 distributionPath=wrapper/dists
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip
 networkTimeout=10000
 validateDistributionUrl=true
 zipStoreBase=GRADLE_USER_HOME
