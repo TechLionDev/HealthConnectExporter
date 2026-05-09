@@ -3,47 +3,50 @@ set -e
 
 echo "=== HealthConnectExporter Setup ==="
 
-# Detect package manager
-if command -v yay &>/dev/null; then
-    PKGMGR="yay"
-elif command -v paru &>/dev/null; then
-    PKGMGR="paru"
-else
-    echo "ERROR: Install yay or paru first"
-    exit 1
+# Java
+if [ -d "/usr/lib/jvm/java-17-openjdk" ]; then
+    export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+elif [ -d "/usr/lib/jvm/java-17" ]; then
+    export JAVA_HOME="/usr/lib/jvm/java-17"
 fi
-
-# Fix JAVA_HOME for CachyOS (Arch)
-export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
-export PATH="$JAVA_HOME/bin:$PATH"
 echo "[1/5] JAVA_HOME=$JAVA_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
 java -version 2>&1 | head -1
 
-# Install Android SDK if needed
-SDK_DIR="/opt/android-sdk"
-if [ ! -d "$SDK_DIR" ]; then
-    echo "[2/5] Installing Android SDK..."
-    sudo $PKGMGR -S --noconfirm android-sdk
-fi
-echo "[2/5] SDK: $SDK_DIR exists"
+# Android SDK
+SDK_DIR="$HOME/android-sdk"
+mkdir -p "$SDK_DIR"
 
-# Install build tools and platform via SDK manager
+# Download cmdline-tools if missing
+if [ ! -f "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+    echo "[2/5] Downloading Android cmdline-tools..."
+    mkdir -p "$SDK_DIR/cmdline-tools"
+    CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+    curl -fsSL "$CMDLINE_URL" -o /tmp/cmdline-tools.zip
+    unzip -q /tmp/cmdline-tools.zip -d "$SDK_DIR/cmdline-tools"
+    mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
+    rm /tmp/cmdline-tools.zip
+fi
+
 export ANDROID_HOME="$SDK_DIR"
 export ANDROID_SDK_ROOT="$SDK_DIR"
-SDK_MANAGER="/opt/android-sdk/tools/bin/sdkmanager"
+export PATH="$SDK_DIR/cmdline-tools/latest/bin:$SDK_DIR/platform-tools:$PATH"
 
-if [ ! -d "$SDK_DIR/platforms/android-34" ]; then
-    echo "[3/5] Installing Android SDK platforms..."
-    yes | "$SDK_MANAGER" --install \
-        "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || \
-    yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --install \
-        "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || true
+# Accept licenses and install required SDK components
+echo "[3/5] Accepting licenses and installing SDK 35..."
+yes | sdkmanager --licenses > /dev/null 2>&1 || true
+sdkmanager --install "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1
+
+# Download Gradle 8.5 if wrapper missing
+WRAPPER_JAR="$HOME/HealthConnectExporter/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "[4/5] Downloading Gradle wrapper..."
+    mkdir -p "$HOME/HealthConnectExporter/gradle/wrapper"
+    curl -fsSL "https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar" -o "$WRAPPER_JAR"
 fi
-echo "[3/5] Platforms ready"
 
-# Fix Gradle wrapper to use AGP 8.2.0 compatible version (8.5, NOT 9.x)
-echo "[4/5] Generating Gradle wrapper (8.5)..."
-cat > gradle/wrapper/gradle-wrapper.properties << 'WRAPPER'
+# Update gradle wrapper properties
+cat > "$HOME/HealthConnectExporter/gradle/wrapper/gradle-wrapper.properties" << 'GRADLEPROPS'
 distributionBase=GRADLE_USER_HOME
 distributionPath=wrapper/dists
 distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip
@@ -51,22 +54,17 @@ networkTimeout=10000
 validateDistributionUrl=true
 zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists
-WRAPPER
-
-chmod +x gradlew
-./gradlew wrapper --no-daemon 2>/dev/null || true
-echo "[4/5] Gradle wrapper ready"
+GRADLEPROPS
 
 # Build
 echo "[5/5] Building APK..."
-./gradlew assembleDebug --no-daemon -q
+cd "$HOME/HealthConnectExporter"
+chmod +x gradlew
+./gradlew assembleDebug --no-daemon
 
-APK=$(find app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -1)
-if [ -n "$APK" ]; then
-    cp "$APK" ./HealthConnectExporter.apk
-    echo ""
+if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+    cp app/build/outputs/apk/debug/app-debug.apk HealthConnectExporter.apk
     echo "=== SUCCESS ==="
-    echo "APK: $(pwd)/HealthConnectExporter.apk"
     ls -lh HealthConnectExporter.apk
 else
     echo "Build failed. Check output above."

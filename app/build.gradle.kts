@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.techlion.healthconnectexporter"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.techlion.healthconnectexporter"
         minSdk = 28
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
