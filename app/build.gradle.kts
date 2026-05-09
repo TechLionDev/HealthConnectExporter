@@ -42,7 +42,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.8.2")
 
     // Health Connect
-    implementation("androidx.health.connect:connect-client:1.0.0")
+    implementation("androidx.health.connect:connect-client:1.0.0-alpha04")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
